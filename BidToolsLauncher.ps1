@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$BidToolsPath = Join-Path $ScriptRoot "BidTools.py"
+$BidToolsPath = Join-Path $ScriptRoot "Bid Tracking Tools\BidTools.py"
 
 function Get-PythonCommand {
   $py = Get-Command "python" -ErrorAction SilentlyContinue
