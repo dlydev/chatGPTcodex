@@ -17,12 +17,12 @@ param(
 $ErrorActionPreference = "Stop"
 
 $HeaderDefaults = @(
-  "Bid folder",
-  "Bid#",
+  "Bid Folder",
+  "Bid Number",
   "Estimator",
-  "GC/Owner",
-  "Description",
-  "Due Date",
+  "Customer/GC",
+  "Bid Name",
+  "Bid Due Date",
   "Proposal Amount",
   "Proposal Date",
   "Bid Status"
@@ -163,12 +163,33 @@ function Close-ExcelContext($ctx) {
 }
 
 function Ensure-Headers($worksheet) {
+  $legacyHeaderMap = @{
+    "Folder Name" = "Bid Folder"
+    "Bid folder" = "Bid Folder"
+    "Bid Folder" = "Bid Folder"
+    "Bid#" = "Bid Number"
+    "Bid Number" = "Bid Number"
+    "GC/Owner" = "Customer/GC"
+    "Customer/GC" = "Customer/GC"
+    "Description" = "Bid Name"
+    "Bid Name" = "Bid Name"
+    "Due Date" = "Bid Due Date"
+    "Bid Due Date" = "Bid Due Date"
+    "Status" = "Bid Status"
+    "Bid Status" = "Bid Status"
+  }
   $headers = @{}
   $hasAny = $false
   for ($col = 1; $col -le 30; $col++) {
     $value = $worksheet.Cells.Item(1, $col).Text
     if (![string]::IsNullOrWhiteSpace($value)) {
-      $headers[$value] = $col
+      $canonical = if ($legacyHeaderMap.ContainsKey($value)) { $legacyHeaderMap[$value] } else { $value }
+      if ($canonical -ne $value) {
+        $worksheet.Cells.Item(1, $col).Value2 = $canonical
+      }
+      if (-not $headers.ContainsKey($canonical)) {
+        $headers[$canonical] = $col
+      }
       $hasAny = $true
     }
   }
@@ -179,12 +200,23 @@ function Ensure-Headers($worksheet) {
     }
     return $headers
   }
-  foreach ($header in $HeaderDefaults) {
-    if (-not $headers.ContainsKey($header)) {
-      $col = ($headers.Values | Measure-Object -Maximum).Maximum + 1
-      $worksheet.Cells.Item(1, $col).Value2 = $header
-      $headers[$header] = $col
+
+  $needsReorder = $false
+  for ($i = 0; $i -lt $HeaderDefaults.Count; $i++) {
+    $current = $worksheet.Cells.Item(1, $i + 1).Text
+    if ($current -ne $HeaderDefaults[$i]) {
+      $needsReorder = $true
+      break
     }
+  }
+  if ($needsReorder) {
+    for ($i = 0; $i -lt $HeaderDefaults.Count; $i++) {
+      $worksheet.Cells.Item(1, $i + 1).Value2 = $HeaderDefaults[$i]
+    }
+  }
+  $headers = @{}
+  for ($i = 0; $i -lt $HeaderDefaults.Count; $i++) {
+    $headers[$HeaderDefaults[$i]] = $i + 1
   }
   return $headers
 }
@@ -196,7 +228,7 @@ function Get-LastRow($worksheet) {
 }
 
 function Get-RowIndexByBidNumber($worksheet, $headers, [string]$bidNumber) {
-  $col = $headers["Bid#"]
+  $col = $headers["Bid Number"]
   $lastRow = Get-LastRow $worksheet
   for ($row = 2; $row -le $lastRow; $row++) {
     $value = $worksheet.Cells.Item($row, $col).Text
@@ -206,7 +238,7 @@ function Get-RowIndexByBidNumber($worksheet, $headers, [string]$bidNumber) {
 }
 
 function Get-RowIndexByFolder($worksheet, $headers, [string]$folderName) {
-  $col = $headers["Bid folder"]
+  $col = $headers["Bid Folder"]
   $lastRow = Get-LastRow $worksheet
   for ($row = 2; $row -le $lastRow; $row++) {
     $value = $worksheet.Cells.Item($row, $col).Text
@@ -216,12 +248,12 @@ function Get-RowIndexByFolder($worksheet, $headers, [string]$folderName) {
 }
 
 function Write-Row($worksheet, $headers, $row, $bidInfo) {
-  $worksheet.Cells.Item($row, $headers["Bid folder"]).Value2 = $bidInfo.Folder
-  $worksheet.Cells.Item($row, $headers["Bid#"]).Value2 = $bidInfo.BidNumber
+  $worksheet.Cells.Item($row, $headers["Bid Folder"]).Value2 = $bidInfo.Folder
+  $worksheet.Cells.Item($row, $headers["Bid Number"]).Value2 = $bidInfo.BidNumber
   $worksheet.Cells.Item($row, $headers["Estimator"]).Value2 = $bidInfo.Initials
-  $worksheet.Cells.Item($row, $headers["GC/Owner"]).Value2 = $bidInfo.Customer
-  $worksheet.Cells.Item($row, $headers["Description"]).Value2 = $bidInfo.BidName
-  $worksheet.Cells.Item($row, $headers["Due Date"]).Value2 = $bidInfo.BidDate
+  $worksheet.Cells.Item($row, $headers["Customer/GC"]).Value2 = $bidInfo.Customer
+  $worksheet.Cells.Item($row, $headers["Bid Name"]).Value2 = $bidInfo.BidName
+  $worksheet.Cells.Item($row, $headers["Bid Due Date"]).Value2 = $bidInfo.BidDate
 }
 
 function Sync-BidWorkbook {
@@ -266,9 +298,7 @@ function Sync-BidWorkbook {
 function Update-BidStatus {
   if (!(Test-Path $WorkbookPath)) { throw "Workbook not found: $WorkbookPath" }
   $bidNumber = Read-NonEmpty "Enter bid number to update"
-  $bidStatus = (Read-Host "Bid Status (leave blank to keep current)").Trim()
-  $proposalDate = (Read-Host "Proposal Date (leave blank to keep current)").Trim()
-  $proposalAmount = (Read-Host "Proposal Amount (leave blank to keep current)").Trim()
+  $status = (Read-Host "Bid Status (leave blank to keep current)").Trim()
 
   $ctx = New-ExcelContext -path $WorkbookPath
   try {
@@ -280,14 +310,8 @@ function Update-BidStatus {
     $row = Get-RowIndexByBidNumber $worksheet $headers $bidNumber
     if ($null -eq $row) { throw "Bid number not found in workbook: $bidNumber" }
 
-    if (-not [string]::IsNullOrWhiteSpace($bidStatus)) {
-      $worksheet.Cells.Item($row, $headers["Bid Status"]).Value2 = $bidStatus
-    }
-    if (-not [string]::IsNullOrWhiteSpace($proposalDate)) {
-      $worksheet.Cells.Item($row, $headers["Proposal Date"]).Value2 = $proposalDate
-    }
-    if (-not [string]::IsNullOrWhiteSpace($proposalAmount)) {
-      $worksheet.Cells.Item($row, $headers["Proposal Amount"]).Value2 = $proposalAmount
+    if (-not [string]::IsNullOrWhiteSpace($status)) {
+      $worksheet.Cells.Item($row, $headers["Bid Status"]).Value2 = $status
     }
   }
   finally {
@@ -309,9 +333,9 @@ function New-BidFolder {
   Sync-BidWorkbook
 
   $initials   = Read-NonEmpty "Estimator initials (ex: MD)"
-  $bidDateRaw = Read-NonEmpty "Due Date (MM-DD, ex: 12-5)"
-  $customer   = Read-NonEmpty "GC/Owner"
-  $bidName    = Read-NonEmpty "Description"
+  $bidDateRaw = Read-NonEmpty "Bid Due Date (MM-DD, ex: 12-5)"
+  $customer   = Read-NonEmpty "Customer/GC"
+  $bidName    = Read-NonEmpty "Bid Name"
 
   $bidDate = Normalize-BidDate $bidDateRaw
   $newNum = Get-NextBidNumber
@@ -342,19 +366,12 @@ function New-BidFolder {
 }
 
 function Show-Menu {
-  Write-Host ""
-  Write-Host "========================================" -ForegroundColor DarkCyan
-  Write-Host "|             BID TOOLS               |" -ForegroundColor Cyan
-  Write-Host "========================================" -ForegroundColor DarkCyan
-  Write-Host ""
-  Write-Host ("BidRoot:       {0}" -f $BidRoot) -ForegroundColor DarkGray
-  Write-Host ("WorkbookPath:  {0}" -f $WorkbookPath) -ForegroundColor DarkGray
-  Write-Host ""
-  Write-Host "1) Create new bid folder" -ForegroundColor Green
-  Write-Host "2) Sync bid list workbook with folders" -ForegroundColor Green
-  Write-Host "3) Update bid status/award in workbook" -ForegroundColor Green
-  Write-Host "4) Exit" -ForegroundColor Yellow
-  Write-Host ""
+  Write-Host "" 
+  Write-Host "Bid Tools" -ForegroundColor Cyan
+  Write-Host "1) Create new bid folder"
+  Write-Host "2) Sync bid list workbook with folders"
+  Write-Host "3) Update bid status in workbook"
+  Write-Host "4) Exit"
 }
 
 while ($true) {
