@@ -20,11 +20,11 @@ $HeaderDefaults = @(
   "Bid Folder",
   "Bid Number",
   "Estimator",
+  "Bid Due Date",
   "Customer/GC",
   "Bid Name",
-  "Bid Due Date",
-  "Proposal Amount",
   "Proposal Date",
+  "Proposal Amount",
   "Bid Status"
 )
 
@@ -251,9 +251,9 @@ function Write-Row($worksheet, $headers, $row, $bidInfo) {
   $worksheet.Cells.Item($row, $headers["Bid Folder"]).Value2 = $bidInfo.Folder
   $worksheet.Cells.Item($row, $headers["Bid Number"]).Value2 = $bidInfo.BidNumber
   $worksheet.Cells.Item($row, $headers["Estimator"]).Value2 = $bidInfo.Initials
+  $worksheet.Cells.Item($row, $headers["Bid Due Date"]).Value2 = $bidInfo.BidDate
   $worksheet.Cells.Item($row, $headers["Customer/GC"]).Value2 = $bidInfo.Customer
   $worksheet.Cells.Item($row, $headers["Bid Name"]).Value2 = $bidInfo.BidName
-  $worksheet.Cells.Item($row, $headers["Bid Due Date"]).Value2 = $bidInfo.BidDate
 }
 
 function Sync-BidWorkbook {
@@ -298,6 +298,8 @@ function Sync-BidWorkbook {
 function Update-BidStatus {
   if (!(Test-Path $WorkbookPath)) { throw "Workbook not found: $WorkbookPath" }
   $bidNumber = Read-NonEmpty "Enter bid number to update"
+  $proposalDate = (Read-Host "Proposal Date (leave blank to keep current)").Trim()
+  $proposalAmount = (Read-Host "Proposal Amount (leave blank to keep current)").Trim()
   $status = (Read-Host "Bid Status (leave blank to keep current)").Trim()
 
   $ctx = New-ExcelContext -path $WorkbookPath
@@ -310,6 +312,12 @@ function Update-BidStatus {
     $row = Get-RowIndexByBidNumber $worksheet $headers $bidNumber
     if ($null -eq $row) { throw "Bid number not found in workbook: $bidNumber" }
 
+    if (-not [string]::IsNullOrWhiteSpace($proposalDate)) {
+      $worksheet.Cells.Item($row, $headers["Proposal Date"]).Value2 = $proposalDate
+    }
+    if (-not [string]::IsNullOrWhiteSpace($proposalAmount)) {
+      $worksheet.Cells.Item($row, $headers["Proposal Amount"]).Value2 = $proposalAmount
+    }
     if (-not [string]::IsNullOrWhiteSpace($status)) {
       $worksheet.Cells.Item($row, $headers["Bid Status"]).Value2 = $status
     }
