@@ -1,3 +1,12 @@
+<#
+.SYNOPSIS
+  Menu-driven bid tools for creating bid folders and updating the bid list workbook.
+.NOTES
+  If PowerShell blocks script execution, run one of the following first:
+    - Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+    - Unblock-File -Path .\BidTools.ps1
+#>
+
 param(
   [string]$BidRoot = "S:\Bid Documents 2026",
   [string]$TemplateRoot = "S:\Bid Documents 2026\26000 Proposal Templates\15 - Folder Structure",
@@ -8,12 +17,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 $HeaderDefaults = @(
-  "Bid Number",
-  "Initials",
-  "Bid Date",
-  "Customer/GC",
-  "Bid Name",
-  "Folder Name",
+  "Bid folder",
+  "Bid#",
+  "Estimator",
+  "GC/Owner",
+  "Description",
+  "Due Date",
+  "Proposal Amount",
+  "Proposal Date",
   "Status",
   "Award"
 )
@@ -95,11 +106,26 @@ function Parse-BidFolderName([string]$folderName) {
   }
 }
 
+function Get-PendingSavePath([string]$path) {
+  $directory = Split-Path $path
+  $baseName = [System.IO.Path]::GetFileNameWithoutExtension($path)
+  $extension = [System.IO.Path]::GetExtension($path)
+  $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+  return (Join-Path $directory ("{0} - Pending Update {1}{2}" -f $baseName, $stamp, $extension))
+}
+
 function New-ExcelContext([string]$path) {
   if (!(Test-Path $path)) { throw "Workbook not found: $path" }
   $excel = New-Object -ComObject Excel.Application
   $excel.Visible = $false
-  $workbook = $excel.Workbooks.Open($path)
+  $readOnly = $false
+  try {
+    $workbook = $excel.Workbooks.Open($path, $null, $false)
+  }
+  catch {
+    $readOnly = $true
+    $workbook = $excel.Workbooks.Open($path, $null, $true)
+  }
   $worksheet = $null
   foreach ($sheet in $workbook.Worksheets) {
     if ($sheet.Name -eq $WorksheetName) {
@@ -115,12 +141,21 @@ function New-ExcelContext([string]$path) {
     Excel = $excel
     Workbook = $workbook
     Worksheet = $worksheet
+    ReadOnly = $readOnly
+    PendingSavePath = $null
   }
 }
 
 function Close-ExcelContext($ctx) {
   if ($null -eq $ctx) { return }
-  $ctx.Workbook.Save()
+  if ($ctx.ReadOnly) {
+    if ($null -ne $ctx.PendingSavePath) {
+      $ctx.Workbook.SaveAs($ctx.PendingSavePath)
+    }
+  }
+  else {
+    $ctx.Workbook.Save()
+  }
   $ctx.Workbook.Close($false)
   $ctx.Excel.Quit()
   [System.Runtime.InteropServices.Marshal]::ReleaseComObject($ctx.Worksheet) | Out-Null
@@ -131,7 +166,7 @@ function Close-ExcelContext($ctx) {
 function Ensure-Headers($worksheet) {
   $headers = @{}
   $hasAny = $false
-  for ($col = 1; $col -le 20; $col++) {
+  for ($col = 1; $col -le 30; $col++) {
     $value = $worksheet.Cells.Item(1, $col).Text
     if (![string]::IsNullOrWhiteSpace($value)) {
       $headers[$value] = $col
@@ -162,7 +197,7 @@ function Get-LastRow($worksheet) {
 }
 
 function Get-RowIndexByBidNumber($worksheet, $headers, [string]$bidNumber) {
-  $col = $headers["Bid Number"]
+  $col = $headers["Bid#"]
   $lastRow = Get-LastRow $worksheet
   for ($row = 2; $row -le $lastRow; $row++) {
     $value = $worksheet.Cells.Item($row, $col).Text
@@ -172,7 +207,7 @@ function Get-RowIndexByBidNumber($worksheet, $headers, [string]$bidNumber) {
 }
 
 function Get-RowIndexByFolder($worksheet, $headers, [string]$folderName) {
-  $col = $headers["Folder Name"]
+  $col = $headers["Bid folder"]
   $lastRow = Get-LastRow $worksheet
   for ($row = 2; $row -le $lastRow; $row++) {
     $value = $worksheet.Cells.Item($row, $col).Text
@@ -182,18 +217,21 @@ function Get-RowIndexByFolder($worksheet, $headers, [string]$folderName) {
 }
 
 function Write-Row($worksheet, $headers, $row, $bidInfo) {
-  $worksheet.Cells.Item($row, $headers["Bid Number"]).Value2 = $bidInfo.BidNumber
-  $worksheet.Cells.Item($row, $headers["Initials"]).Value2 = $bidInfo.Initials
-  $worksheet.Cells.Item($row, $headers["Bid Date"]).Value2 = $bidInfo.BidDate
-  $worksheet.Cells.Item($row, $headers["Customer/GC"]).Value2 = $bidInfo.Customer
-  $worksheet.Cells.Item($row, $headers["Bid Name"]).Value2 = $bidInfo.BidName
-  $worksheet.Cells.Item($row, $headers["Folder Name"]).Value2 = $bidInfo.Folder
+  $worksheet.Cells.Item($row, $headers["Bid folder"]).Value2 = $bidInfo.Folder
+  $worksheet.Cells.Item($row, $headers["Bid#"]).Value2 = $bidInfo.BidNumber
+  $worksheet.Cells.Item($row, $headers["Estimator"]).Value2 = $bidInfo.Initials
+  $worksheet.Cells.Item($row, $headers["GC/Owner"]).Value2 = $bidInfo.Customer
+  $worksheet.Cells.Item($row, $headers["Description"]).Value2 = $bidInfo.BidName
+  $worksheet.Cells.Item($row, $headers["Due Date"]).Value2 = $bidInfo.BidDate
 }
 
 function Sync-BidWorkbook {
   if (!(Test-Path $WorkbookPath)) { throw "Workbook not found: $WorkbookPath" }
   $ctx = New-ExcelContext -path $WorkbookPath
   try {
+    if ($ctx.ReadOnly) {
+      $ctx.PendingSavePath = Get-PendingSavePath -path $WorkbookPath
+    }
     $worksheet = $ctx.Worksheet
     $headers = Ensure-Headers $worksheet
     $lastRow = Get-LastRow $worksheet
@@ -217,26 +255,39 @@ function Sync-BidWorkbook {
     Close-ExcelContext $ctx
   }
 
-  Write-Host "Workbook updated with current bid folders." -ForegroundColor Green
+  if ($ctx.ReadOnly -and $null -ne $ctx.PendingSavePath) {
+    Write-Host "Workbook is open by another user; saved updates to:" -ForegroundColor Yellow
+    Write-Host $ctx.PendingSavePath -ForegroundColor Yellow
+  }
+  else {
+    Write-Host "Workbook updated with current bid folders." -ForegroundColor Green
+  }
 }
 
 function Update-BidStatus {
   if (!(Test-Path $WorkbookPath)) { throw "Workbook not found: $WorkbookPath" }
   $bidNumber = Read-NonEmpty "Enter bid number to update"
   $status = (Read-Host "Status (leave blank to keep current)").Trim()
-  $award = (Read-Host "Award (leave blank to keep current)").Trim()
+  $award = ""
 
   $ctx = New-ExcelContext -path $WorkbookPath
   try {
+    if ($ctx.ReadOnly) {
+      $ctx.PendingSavePath = Get-PendingSavePath -path $WorkbookPath
+    }
     $worksheet = $ctx.Worksheet
     $headers = Ensure-Headers $worksheet
     $row = Get-RowIndexByBidNumber $worksheet $headers $bidNumber
     if ($null -eq $row) { throw "Bid number not found in workbook: $bidNumber" }
 
+    if ($headers.ContainsKey("Award")) {
+      $award = (Read-Host "Award (leave blank to keep current)").Trim()
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($status)) {
       $worksheet.Cells.Item($row, $headers["Status"]).Value2 = $status
     }
-    if (-not [string]::IsNullOrWhiteSpace($award)) {
+    if (-not [string]::IsNullOrWhiteSpace($award) -and $headers.ContainsKey("Award")) {
       $worksheet.Cells.Item($row, $headers["Award"]).Value2 = $award
     }
   }
@@ -244,16 +295,24 @@ function Update-BidStatus {
     Close-ExcelContext $ctx
   }
 
-  Write-Host "Workbook status updated." -ForegroundColor Green
+  if ($ctx.ReadOnly -and $null -ne $ctx.PendingSavePath) {
+    Write-Host "Workbook is open by another user; saved updates to:" -ForegroundColor Yellow
+    Write-Host $ctx.PendingSavePath -ForegroundColor Yellow
+  }
+  else {
+    Write-Host "Workbook status updated." -ForegroundColor Green
+  }
 }
 
 function New-BidFolder {
   Assert-Paths
 
-  $initials   = Read-NonEmpty "Estimators initials (ex: MD)"
-  $bidDateRaw = Read-NonEmpty "Bid Date (MM-DD, ex: 12-5)"
-  $customer   = Read-NonEmpty "Customer/GC"
-  $bidName    = Read-NonEmpty "Bid Name"
+  Sync-BidWorkbook
+
+  $initials   = Read-NonEmpty "Estimator initials (ex: MD)"
+  $bidDateRaw = Read-NonEmpty "Due Date (MM-DD, ex: 12-5)"
+  $customer   = Read-NonEmpty "GC/Owner"
+  $bidName    = Read-NonEmpty "Description"
 
   $bidDate = Normalize-BidDate $bidDateRaw
   $newNum = Get-NextBidNumber
