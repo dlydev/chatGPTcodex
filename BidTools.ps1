@@ -163,12 +163,33 @@ function Close-ExcelContext($ctx) {
 }
 
 function Ensure-Headers($worksheet) {
+  $legacyHeaderMap = @{
+    "Folder Name" = "Bid Folder"
+    "Bid folder" = "Bid Folder"
+    "Bid Folder" = "Bid Folder"
+    "Bid#" = "Bid Number"
+    "Bid Number" = "Bid Number"
+    "GC/Owner" = "Customer/GC"
+    "Customer/GC" = "Customer/GC"
+    "Description" = "Bid Name"
+    "Bid Name" = "Bid Name"
+    "Due Date" = "Bid Due Date"
+    "Bid Due Date" = "Bid Due Date"
+    "Status" = "Bid Status"
+    "Bid Status" = "Bid Status"
+  }
   $headers = @{}
   $hasAny = $false
   for ($col = 1; $col -le 30; $col++) {
     $value = $worksheet.Cells.Item(1, $col).Text
     if (![string]::IsNullOrWhiteSpace($value)) {
-      $headers[$value] = $col
+      $canonical = if ($legacyHeaderMap.ContainsKey($value)) { $legacyHeaderMap[$value] } else { $value }
+      if ($canonical -ne $value) {
+        $worksheet.Cells.Item(1, $col).Value2 = $canonical
+      }
+      if (-not $headers.ContainsKey($canonical)) {
+        $headers[$canonical] = $col
+      }
       $hasAny = $true
     }
   }
@@ -179,12 +200,23 @@ function Ensure-Headers($worksheet) {
     }
     return $headers
   }
-  foreach ($header in $HeaderDefaults) {
-    if (-not $headers.ContainsKey($header)) {
-      $col = ($headers.Values | Measure-Object -Maximum).Maximum + 1
-      $worksheet.Cells.Item(1, $col).Value2 = $header
-      $headers[$header] = $col
+
+  $needsReorder = $false
+  for ($i = 0; $i -lt $HeaderDefaults.Count; $i++) {
+    $current = $worksheet.Cells.Item(1, $i + 1).Text
+    if ($current -ne $HeaderDefaults[$i]) {
+      $needsReorder = $true
+      break
     }
+  }
+  if ($needsReorder) {
+    for ($i = 0; $i -lt $HeaderDefaults.Count; $i++) {
+      $worksheet.Cells.Item(1, $i + 1).Value2 = $HeaderDefaults[$i]
+    }
+  }
+  $headers = @{}
+  for ($i = 0; $i -lt $HeaderDefaults.Count; $i++) {
+    $headers[$HeaderDefaults[$i]] = $i + 1
   }
   return $headers
 }
@@ -309,9 +341,9 @@ function New-BidFolder {
   Sync-BidWorkbook
 
   $initials   = Read-NonEmpty "Estimator initials (ex: MD)"
-  $bidDateRaw = Read-NonEmpty "Due Date (MM-DD, ex: 12-5)"
-  $customer   = Read-NonEmpty "GC/Owner"
-  $bidName    = Read-NonEmpty "Description"
+  $bidDateRaw = Read-NonEmpty "Bid Due Date (MM-DD, ex: 12-5)"
+  $customer   = Read-NonEmpty "Customer/GC"
+  $bidName    = Read-NonEmpty "Bid Name"
 
   $bidDate = Normalize-BidDate $bidDateRaw
   $newNum = Get-NextBidNumber
@@ -346,7 +378,7 @@ function Show-Menu {
   Write-Host "Bid Tools" -ForegroundColor Cyan
   Write-Host "1) Create new bid folder"
   Write-Host "2) Sync bid list workbook with folders"
-  Write-Host "3) Update bid status/award in workbook"
+  Write-Host "3) Update bid status in workbook"
   Write-Host "4) Exit"
 }
 
