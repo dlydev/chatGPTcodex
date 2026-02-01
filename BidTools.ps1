@@ -17,16 +17,15 @@ param(
 $ErrorActionPreference = "Stop"
 
 $HeaderDefaults = @(
-  "Bid folder",
-  "Bid#",
+  "Bid Folder",
+  "Bid Number",
   "Estimator",
-  "GC/Owner",
-  "Description",
-  "Due Date",
-  "Proposal Amount",
+  "Bid Due Date",
+  "Customer/GC",
+  "Bid Name",
   "Proposal Date",
-  "Status",
-  "Award"
+  "Proposal Amount",
+  "Bid Status"
 )
 
 function Sanitize-Name([string]$s) {
@@ -197,7 +196,7 @@ function Get-LastRow($worksheet) {
 }
 
 function Get-RowIndexByBidNumber($worksheet, $headers, [string]$bidNumber) {
-  $col = $headers["Bid#"]
+  $col = $headers["Bid Number"]
   $lastRow = Get-LastRow $worksheet
   for ($row = 2; $row -le $lastRow; $row++) {
     $value = $worksheet.Cells.Item($row, $col).Text
@@ -207,7 +206,7 @@ function Get-RowIndexByBidNumber($worksheet, $headers, [string]$bidNumber) {
 }
 
 function Get-RowIndexByFolder($worksheet, $headers, [string]$folderName) {
-  $col = $headers["Bid folder"]
+  $col = $headers["Bid Folder"]
   $lastRow = Get-LastRow $worksheet
   for ($row = 2; $row -le $lastRow; $row++) {
     $value = $worksheet.Cells.Item($row, $col).Text
@@ -217,12 +216,12 @@ function Get-RowIndexByFolder($worksheet, $headers, [string]$folderName) {
 }
 
 function Write-Row($worksheet, $headers, $row, $bidInfo) {
-  $worksheet.Cells.Item($row, $headers["Bid folder"]).Value2 = $bidInfo.Folder
-  $worksheet.Cells.Item($row, $headers["Bid#"]).Value2 = $bidInfo.BidNumber
+  $worksheet.Cells.Item($row, $headers["Bid Folder"]).Value2 = $bidInfo.Folder
+  $worksheet.Cells.Item($row, $headers["Bid Number"]).Value2 = $bidInfo.BidNumber
   $worksheet.Cells.Item($row, $headers["Estimator"]).Value2 = $bidInfo.Initials
-  $worksheet.Cells.Item($row, $headers["GC/Owner"]).Value2 = $bidInfo.Customer
-  $worksheet.Cells.Item($row, $headers["Description"]).Value2 = $bidInfo.BidName
-  $worksheet.Cells.Item($row, $headers["Due Date"]).Value2 = $bidInfo.BidDate
+  $worksheet.Cells.Item($row, $headers["Bid Due Date"]).Value2 = $bidInfo.BidDate
+  $worksheet.Cells.Item($row, $headers["Customer/GC"]).Value2 = $bidInfo.Customer
+  $worksheet.Cells.Item($row, $headers["Bid Name"]).Value2 = $bidInfo.BidName
 }
 
 function Sync-BidWorkbook {
@@ -267,8 +266,9 @@ function Sync-BidWorkbook {
 function Update-BidStatus {
   if (!(Test-Path $WorkbookPath)) { throw "Workbook not found: $WorkbookPath" }
   $bidNumber = Read-NonEmpty "Enter bid number to update"
-  $status = (Read-Host "Status (leave blank to keep current)").Trim()
-  $award = ""
+  $proposalDate = (Read-Host "Proposal Date (leave blank to keep current)").Trim()
+  $proposalAmount = (Read-Host "Proposal Amount (leave blank to keep current)").Trim()
+  $status = (Read-Host "Bid Status (leave blank to keep current)").Trim()
 
   $ctx = New-ExcelContext -path $WorkbookPath
   try {
@@ -280,15 +280,14 @@ function Update-BidStatus {
     $row = Get-RowIndexByBidNumber $worksheet $headers $bidNumber
     if ($null -eq $row) { throw "Bid number not found in workbook: $bidNumber" }
 
-    if ($headers.ContainsKey("Award")) {
-      $award = (Read-Host "Award (leave blank to keep current)").Trim()
+    if (-not [string]::IsNullOrWhiteSpace($proposalDate)) {
+      $worksheet.Cells.Item($row, $headers["Proposal Date"]).Value2 = $proposalDate
     }
-
+    if (-not [string]::IsNullOrWhiteSpace($proposalAmount)) {
+      $worksheet.Cells.Item($row, $headers["Proposal Amount"]).Value2 = $proposalAmount
+    }
     if (-not [string]::IsNullOrWhiteSpace($status)) {
-      $worksheet.Cells.Item($row, $headers["Status"]).Value2 = $status
-    }
-    if (-not [string]::IsNullOrWhiteSpace($award) -and $headers.ContainsKey("Award")) {
-      $worksheet.Cells.Item($row, $headers["Award"]).Value2 = $award
+      $worksheet.Cells.Item($row, $headers["Bid Status"]).Value2 = $status
     }
   }
   finally {
