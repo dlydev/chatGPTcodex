@@ -7,6 +7,7 @@
 #>
 
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BidToolsPath = Join-Path $ScriptRoot "BidTools.py"
@@ -25,18 +26,20 @@ function Install-PythonUserScope {
 
   $winget = Get-Command "winget" -ErrorAction SilentlyContinue
   if ($null -ne $winget) {
-    Write-Host "Python not found. Installing via winget (user scope)..." -ForegroundColor Yellow
-    & $winget.Source install -e --id Python.Python.3.11 --scope user --silent
+    Write-Host ""
+    Write-Host "Installing Python (user scope)..." -ForegroundColor Cyan
+    & $winget.Source install -e --id Python.Python.3.11 --scope user --silent --accept-package-agreements --accept-source-agreements | Out-Null
     Start-Sleep -Seconds 2
     $pythonCmd = Get-PythonCommand
     if ($null -ne $pythonCmd) { return $pythonCmd }
   }
 
-  Write-Host "Python not found. Downloading per-user installer..." -ForegroundColor Yellow
+  Write-Host ""
+  Write-Host "Installing Python (user scope)..." -ForegroundColor Cyan
   $installerUrl = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
   $installerPath = Join-Path $env:TEMP "python-3.11.9-amd64.exe"
-  Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath
-  & $installerPath /quiet InstallAllUsers=0 PrependPath=1 Include_pip=1
+  Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
+  & $installerPath /quiet InstallAllUsers=0 PrependPath=1 Include_pip=1 | Out-Null
   Start-Sleep -Seconds 2
   $pythonCmd = Get-PythonCommand
   if ($null -eq $pythonCmd) {
@@ -46,8 +49,9 @@ function Install-PythonUserScope {
 }
 
 function Ensure-Dependency([string]$pythonCmd, [string]$package) {
+  Write-Host ""
   Write-Host "Ensuring dependency: $package" -ForegroundColor Cyan
-  & $pythonCmd -m pip install --user --upgrade $package
+  & $pythonCmd -m pip install --user --upgrade $package --disable-pip-version-check --quiet | Out-Null
 }
 
 if (!(Test-Path $BidToolsPath)) {
@@ -58,5 +62,6 @@ $pythonCmd = Install-PythonUserScope
 Ensure-Dependency -pythonCmd $pythonCmd -package "pip"
 Ensure-Dependency -pythonCmd $pythonCmd -package "openpyxl"
 
+Write-Host ""
 Write-Host "Launching BidTools.py..." -ForegroundColor Green
 & $pythonCmd $BidToolsPath
