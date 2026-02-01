@@ -343,12 +343,19 @@ function New-BidFolder {
 }
 
 function Show-Menu {
-  Write-Host "" 
-  Write-Host "Bid Tools" -ForegroundColor Cyan
-  Write-Host "1) Create new bid folder"
-  Write-Host "2) Sync bid list workbook with folders"
-  Write-Host "3) Update bid status/award in workbook"
-  Write-Host "4) Exit"
+  Write-Host ""
+  Write-Host "========================================" -ForegroundColor DarkCyan
+  Write-Host "|             BID TOOLS               |" -ForegroundColor Cyan
+  Write-Host "========================================" -ForegroundColor DarkCyan
+  Write-Host ""
+  Write-Host ("BidRoot:       {0}" -f $BidRoot) -ForegroundColor DarkGray
+  Write-Host ("WorkbookPath:  {0}" -f $WorkbookPath) -ForegroundColor DarkGray
+  Write-Host ""
+  Write-Host "1) Create new bid folder" -ForegroundColor Green
+  Write-Host "2) Sync bid list workbook with folders" -ForegroundColor Green
+  Write-Host "3) Update bid status/award in workbook" -ForegroundColor Green
+  Write-Host "4) Exit" -ForegroundColor Yellow
+  Write-Host ""
 }
 
 while ($true) {
