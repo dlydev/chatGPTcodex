@@ -17,8 +17,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $HeaderDefaults = @(
-  "Folder Name",
-  "Bid#",
+  "Bid Folder",
+  "Bid Number",
   "Estimator",
   "Bid Due Date",
   "Customer/GC",
@@ -165,18 +165,11 @@ function Close-ExcelContext($ctx) {
 function Ensure-Headers($worksheet) {
   $legacyHeaderMap = @{
     "Folder Name" = "Bid Folder"
-    "Bid folder" = "Bid Folder"
-    "Bid Folder" = "Bid Folder"
     "Bid#" = "Bid Number"
-    "Bid Number" = "Bid Number"
     "GC/Owner" = "Customer/GC"
-    "Customer/GC" = "Customer/GC"
     "Description" = "Bid Name"
-    "Bid Name" = "Bid Name"
     "Due Date" = "Bid Due Date"
-    "Bid Due Date" = "Bid Due Date"
     "Status" = "Bid Status"
-    "Bid Status" = "Bid Status"
   }
   $headers = @{}
   $hasAny = $false
@@ -192,12 +185,6 @@ function Ensure-Headers($worksheet) {
       }
       $hasAny = $true
     }
-  }
-  if ($headers.ContainsKey("Bid folder") -and -not $headers.ContainsKey("Folder Name")) {
-    $col = $headers["Bid folder"]
-    $worksheet.Cells.Item(1, $col).Value2 = "Folder Name"
-    $headers.Remove("Bid folder")
-    $headers["Folder Name"] = $col
   }
   if (-not $hasAny) {
     for ($i = 0; $i -lt $HeaderDefaults.Count; $i++) {
@@ -250,7 +237,7 @@ function Get-RowIndexByBidNumber($worksheet, $headers, [string]$bidNumber) {
 }
 
 function Get-RowIndexByFolder($worksheet, $headers, [string]$folderName) {
-  $col = $headers["Folder Name"]
+  $col = $headers["Bid Folder"]
   $lastRow = Get-LastRow $worksheet
   for ($row = 2; $row -le $lastRow; $row++) {
     $value = $worksheet.Cells.Item($row, $col).Text
@@ -260,8 +247,8 @@ function Get-RowIndexByFolder($worksheet, $headers, [string]$folderName) {
 }
 
 function Write-Row($worksheet, $headers, $row, $bidInfo) {
-  $worksheet.Cells.Item($row, $headers["Folder Name"]).Value2 = $bidInfo.Folder
-  $worksheet.Cells.Item($row, $headers["Bid#"]).Value2 = $bidInfo.BidNumber
+  $worksheet.Cells.Item($row, $headers["Bid Folder"]).Value2 = $bidInfo.Folder
+  $worksheet.Cells.Item($row, $headers["Bid Number"]).Value2 = $bidInfo.BidNumber
   $worksheet.Cells.Item($row, $headers["Estimator"]).Value2 = $bidInfo.Initials
   $worksheet.Cells.Item($row, $headers["Bid Due Date"]).Value2 = $bidInfo.BidDate
   $worksheet.Cells.Item($row, $headers["Customer/GC"]).Value2 = $bidInfo.Customer
