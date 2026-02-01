@@ -1,0 +1,305 @@
+param(
+  [string]$BidRoot = "S:\Bid Documents 2026",
+  [string]$TemplateRoot = "S:\Bid Documents 2026\26000 Proposal Templates\15 - Folder Structure",
+  [string]$WorkbookPath = "S:\Bid Documents 2026\26000 Proposal Templates\Bid List.xlsx",
+  [string]$WorksheetName = "Bid List"
+)
+
+$ErrorActionPreference = "Stop"
+
+$HeaderDefaults = @(
+  "Bid Number",
+  "Initials",
+  "Bid Date",
+  "Customer/GC",
+  "Bid Name",
+  "Folder Name",
+  "Status",
+  "Award"
+)
+
+function Sanitize-Name([string]$s) {
+  if ($null -eq $s) { return "" }
+  $s = $s -replace '[\\/:*?"<>|]', ' '
+  $s = ($s -replace '\s+', ' ').Trim()
+  return $s
+}
+
+function Read-YesNoDefaultNo([string]$prompt) {
+  while ($true) {
+    $raw = (Read-Host "$prompt (Y/N) [N]").Trim()
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $false }
+    switch -Regex ($raw) {
+      '^(y|yes)$' { return $true }
+      '^(n|no)$'  { return $false }
+      default     { Write-Host "Please enter Y or N (or press Enter for N)." -ForegroundColor Yellow }
+    }
+  }
+}
+
+function Read-NonEmpty([string]$prompt) {
+  while ($true) {
+    $value = Sanitize-Name (Read-Host $prompt)
+    if (![string]::IsNullOrWhiteSpace($value)) { return $value }
+    Write-Host "Value is required." -ForegroundColor Yellow
+  }
+}
+
+function Assert-Paths {
+  if (!(Test-Path $BidRoot)) { throw "BidRoot not found: $BidRoot" }
+  if (!(Test-Path $TemplateRoot)) { throw "TemplateRoot not found: $TemplateRoot" }
+}
+
+function Get-BidFolders {
+  Get-ChildItem -Path $BidRoot -Directory -ErrorAction Stop |
+    Sort-Object Name
+}
+
+function Get-NextBidNumber {
+  $max = 0
+  foreach ($f in (Get-BidFolders)) {
+    if ($f.Name -match '^\s*(\d+)\b') {
+      $n = [int]$Matches[1]
+      if ($n -gt $max) { $max = $n }
+    }
+  }
+  if ($max -eq 0) { throw "No existing bid-number folders found in: $BidRoot" }
+  return ($max + 1)
+}
+
+function Normalize-BidDate([string]$bidDateRaw) {
+  if ($bidDateRaw -notmatch '^(0?[1-9]|1[0-2])-(0?[1-9]|[12]\d|3[01])$') {
+    throw "Bid Date must be in MM-DD format (ex: 12-5 or 12-05). You entered: $bidDateRaw"
+  }
+  $parts = $bidDateRaw.Split('-')
+  $mm = "{0:D2}" -f [int]$parts[0]
+  $dd = "{0:D2}" -f [int]$parts[1]
+  return "$mm-$dd"
+}
+
+function Build-BidFolderName([int]$bidNumber, [string]$initials, [string]$bidDate, [string]$customer, [string]$bidName) {
+  $name = "{0} - {1} - {2} - {3} - {4}" -f $bidNumber, $initials, $bidDate, $customer, $bidName
+  return (Sanitize-Name $name)
+}
+
+function Parse-BidFolderName([string]$folderName) {
+  $parts = $folderName -split '\s-\s', 5
+  if ($parts.Count -lt 5) { return $null }
+  return [pscustomobject]@{
+    BidNumber = ($parts[0]).Trim()
+    Initials  = ($parts[1]).Trim()
+    BidDate   = ($parts[2]).Trim()
+    Customer  = ($parts[3]).Trim()
+    BidName   = ($parts[4]).Trim()
+    Folder    = $folderName
+  }
+}
+
+function New-ExcelContext([string]$path) {
+  if (!(Test-Path $path)) { throw "Workbook not found: $path" }
+  $excel = New-Object -ComObject Excel.Application
+  $excel.Visible = $false
+  $workbook = $excel.Workbooks.Open($path)
+  $worksheet = $null
+  foreach ($sheet in $workbook.Worksheets) {
+    if ($sheet.Name -eq $WorksheetName) {
+      $worksheet = $sheet
+      break
+    }
+  }
+  if ($null -eq $worksheet) {
+    $worksheet = $workbook.Worksheets.Add()
+    $worksheet.Name = $WorksheetName
+  }
+  return [pscustomobject]@{
+    Excel = $excel
+    Workbook = $workbook
+    Worksheet = $worksheet
+  }
+}
+
+function Close-ExcelContext($ctx) {
+  if ($null -eq $ctx) { return }
+  $ctx.Workbook.Save()
+  $ctx.Workbook.Close($false)
+  $ctx.Excel.Quit()
+  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($ctx.Worksheet) | Out-Null
+  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($ctx.Workbook) | Out-Null
+  [System.Runtime.InteropServices.Marshal]::ReleaseComObject($ctx.Excel) | Out-Null
+}
+
+function Ensure-Headers($worksheet) {
+  $headers = @{}
+  $hasAny = $false
+  for ($col = 1; $col -le 20; $col++) {
+    $value = $worksheet.Cells.Item(1, $col).Text
+    if (![string]::IsNullOrWhiteSpace($value)) {
+      $headers[$value] = $col
+      $hasAny = $true
+    }
+  }
+  if (-not $hasAny) {
+    for ($i = 0; $i -lt $HeaderDefaults.Count; $i++) {
+      $worksheet.Cells.Item(1, $i + 1).Value2 = $HeaderDefaults[$i]
+      $headers[$HeaderDefaults[$i]] = $i + 1
+    }
+    return $headers
+  }
+  foreach ($header in $HeaderDefaults) {
+    if (-not $headers.ContainsKey($header)) {
+      $col = ($headers.Values | Measure-Object -Maximum).Maximum + 1
+      $worksheet.Cells.Item(1, $col).Value2 = $header
+      $headers[$header] = $col
+    }
+  }
+  return $headers
+}
+
+function Get-LastRow($worksheet) {
+  $used = $worksheet.UsedRange
+  if ($null -eq $used) { return 1 }
+  return $used.Rows.Count
+}
+
+function Get-RowIndexByBidNumber($worksheet, $headers, [string]$bidNumber) {
+  $col = $headers["Bid Number"]
+  $lastRow = Get-LastRow $worksheet
+  for ($row = 2; $row -le $lastRow; $row++) {
+    $value = $worksheet.Cells.Item($row, $col).Text
+    if ($value -eq $bidNumber) { return $row }
+  }
+  return $null
+}
+
+function Get-RowIndexByFolder($worksheet, $headers, [string]$folderName) {
+  $col = $headers["Folder Name"]
+  $lastRow = Get-LastRow $worksheet
+  for ($row = 2; $row -le $lastRow; $row++) {
+    $value = $worksheet.Cells.Item($row, $col).Text
+    if ($value -eq $folderName) { return $row }
+  }
+  return $null
+}
+
+function Write-Row($worksheet, $headers, $row, $bidInfo) {
+  $worksheet.Cells.Item($row, $headers["Bid Number"]).Value2 = $bidInfo.BidNumber
+  $worksheet.Cells.Item($row, $headers["Initials"]).Value2 = $bidInfo.Initials
+  $worksheet.Cells.Item($row, $headers["Bid Date"]).Value2 = $bidInfo.BidDate
+  $worksheet.Cells.Item($row, $headers["Customer/GC"]).Value2 = $bidInfo.Customer
+  $worksheet.Cells.Item($row, $headers["Bid Name"]).Value2 = $bidInfo.BidName
+  $worksheet.Cells.Item($row, $headers["Folder Name"]).Value2 = $bidInfo.Folder
+}
+
+function Sync-BidWorkbook {
+  if (!(Test-Path $WorkbookPath)) { throw "Workbook not found: $WorkbookPath" }
+  $ctx = New-ExcelContext -path $WorkbookPath
+  try {
+    $worksheet = $ctx.Worksheet
+    $headers = Ensure-Headers $worksheet
+    $lastRow = Get-LastRow $worksheet
+
+    foreach ($folder in (Get-BidFolders)) {
+      $info = Parse-BidFolderName $folder.Name
+      if ($null -eq $info) { continue }
+
+      $row = Get-RowIndexByBidNumber $worksheet $headers $info.BidNumber
+      if ($null -eq $row) {
+        $row = Get-RowIndexByFolder $worksheet $headers $info.Folder
+      }
+      if ($null -eq $row) {
+        $lastRow++
+        $row = $lastRow
+      }
+      Write-Row $worksheet $headers $row $info
+    }
+  }
+  finally {
+    Close-ExcelContext $ctx
+  }
+
+  Write-Host "Workbook updated with current bid folders." -ForegroundColor Green
+}
+
+function Update-BidStatus {
+  if (!(Test-Path $WorkbookPath)) { throw "Workbook not found: $WorkbookPath" }
+  $bidNumber = Read-NonEmpty "Enter bid number to update"
+  $status = (Read-Host "Status (leave blank to keep current)").Trim()
+  $award = (Read-Host "Award (leave blank to keep current)").Trim()
+
+  $ctx = New-ExcelContext -path $WorkbookPath
+  try {
+    $worksheet = $ctx.Worksheet
+    $headers = Ensure-Headers $worksheet
+    $row = Get-RowIndexByBidNumber $worksheet $headers $bidNumber
+    if ($null -eq $row) { throw "Bid number not found in workbook: $bidNumber" }
+
+    if (-not [string]::IsNullOrWhiteSpace($status)) {
+      $worksheet.Cells.Item($row, $headers["Status"]).Value2 = $status
+    }
+    if (-not [string]::IsNullOrWhiteSpace($award)) {
+      $worksheet.Cells.Item($row, $headers["Award"]).Value2 = $award
+    }
+  }
+  finally {
+    Close-ExcelContext $ctx
+  }
+
+  Write-Host "Workbook status updated." -ForegroundColor Green
+}
+
+function New-BidFolder {
+  Assert-Paths
+
+  $initials   = Read-NonEmpty "Estimators initials (ex: MD)"
+  $bidDateRaw = Read-NonEmpty "Bid Date (MM-DD, ex: 12-5)"
+  $customer   = Read-NonEmpty "Customer/GC"
+  $bidName    = Read-NonEmpty "Bid Name"
+
+  $bidDate = Normalize-BidDate $bidDateRaw
+  $newNum = Get-NextBidNumber
+
+  $newFolderName = Build-BidFolderName $newNum $initials $bidDate $customer $bidName
+  $dest = Join-Path $BidRoot $newFolderName
+  if (Test-Path $dest) { throw "Destination already exists: $dest" }
+
+  New-Item -Path $dest -ItemType Directory | Out-Null
+
+  $copyTemplate = Read-YesNoDefaultNo "Copy subfolder structure from the template?"
+  if ($copyTemplate) {
+    Copy-Item -Path (Join-Path $TemplateRoot '*') -Destination $dest -Recurse -Force -Exclude 'Thumbs.db'
+    Get-ChildItem -Path $dest -Filter "Thumbs.db" -Recurse -Force -ErrorAction SilentlyContinue |
+      Remove-Item -Force -ErrorAction SilentlyContinue
+  }
+
+  Write-Host "" 
+  Write-Host "Created new bid folder:" -ForegroundColor Green
+  Write-Host $dest -ForegroundColor Green
+  Write-Host ""
+
+  if (Read-YesNoDefaultNo "Update the bid list workbook now?") {
+    Sync-BidWorkbook
+  }
+
+  Start-Process explorer.exe $dest
+}
+
+function Show-Menu {
+  Write-Host "" 
+  Write-Host "Bid Tools" -ForegroundColor Cyan
+  Write-Host "1) Create new bid folder"
+  Write-Host "2) Sync bid list workbook with folders"
+  Write-Host "3) Update bid status/award in workbook"
+  Write-Host "4) Exit"
+}
+
+while ($true) {
+  Show-Menu
+  $choice = (Read-Host "Choose an option (1-4)").Trim()
+  switch ($choice) {
+    '1' { New-BidFolder }
+    '2' { Sync-BidWorkbook }
+    '3' { Update-BidStatus }
+    '4' { break }
+    default { Write-Host "Invalid option. Choose 1-4." -ForegroundColor Yellow }
+  }
+}
