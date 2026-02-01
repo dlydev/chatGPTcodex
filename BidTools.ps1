@@ -25,8 +25,7 @@ $HeaderDefaults = @(
   "Due Date",
   "Proposal Amount",
   "Proposal Date",
-  "Status",
-  "Award"
+  "Bid Status"
 )
 
 function Sanitize-Name([string]$s) {
@@ -267,8 +266,9 @@ function Sync-BidWorkbook {
 function Update-BidStatus {
   if (!(Test-Path $WorkbookPath)) { throw "Workbook not found: $WorkbookPath" }
   $bidNumber = Read-NonEmpty "Enter bid number to update"
-  $status = (Read-Host "Status (leave blank to keep current)").Trim()
-  $award = ""
+  $bidStatus = (Read-Host "Bid Status (leave blank to keep current)").Trim()
+  $proposalDate = (Read-Host "Proposal Date (leave blank to keep current)").Trim()
+  $proposalAmount = (Read-Host "Proposal Amount (leave blank to keep current)").Trim()
 
   $ctx = New-ExcelContext -path $WorkbookPath
   try {
@@ -280,15 +280,14 @@ function Update-BidStatus {
     $row = Get-RowIndexByBidNumber $worksheet $headers $bidNumber
     if ($null -eq $row) { throw "Bid number not found in workbook: $bidNumber" }
 
-    if ($headers.ContainsKey("Award")) {
-      $award = (Read-Host "Award (leave blank to keep current)").Trim()
+    if (-not [string]::IsNullOrWhiteSpace($bidStatus)) {
+      $worksheet.Cells.Item($row, $headers["Bid Status"]).Value2 = $bidStatus
     }
-
-    if (-not [string]::IsNullOrWhiteSpace($status)) {
-      $worksheet.Cells.Item($row, $headers["Status"]).Value2 = $status
+    if (-not [string]::IsNullOrWhiteSpace($proposalDate)) {
+      $worksheet.Cells.Item($row, $headers["Proposal Date"]).Value2 = $proposalDate
     }
-    if (-not [string]::IsNullOrWhiteSpace($award) -and $headers.ContainsKey("Award")) {
-      $worksheet.Cells.Item($row, $headers["Award"]).Value2 = $award
+    if (-not [string]::IsNullOrWhiteSpace($proposalAmount)) {
+      $worksheet.Cells.Item($row, $headers["Proposal Amount"]).Value2 = $proposalAmount
     }
   }
   finally {
