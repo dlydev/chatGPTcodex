@@ -274,20 +274,35 @@ def sync_bid_workbook(bid_root: Path, workbook_path: Path, worksheet_name: str) 
         print("Workbook updated with current bid folders.")
 
 
-def update_bid_status(workbook_path: Path, worksheet_name: str) -> None:
+def update_bid_status(bid_root: Path, workbook_path: Path, worksheet_name: str) -> None:
     bid_number = read_non_empty("Enter bid number to update")
     status = input("Status (leave blank to keep current)").strip()
     award = ""
     proposal_amount = ""
     proposal_date = ""
 
-    context = new_excel_context(workbook_path, worksheet_name)
+    if not bid_root.exists():
+        print(f"Bid root not found: {bid_root}")
+        return
+
+    try:
+        sync_bid_workbook(bid_root, workbook_path, worksheet_name)
+    except (FileNotFoundError, PermissionError, OSError, ValueError) as exc:
+        print(f"Could not sync workbook before updating status: {exc}")
+        return
+
+    try:
+        context = new_excel_context(workbook_path, worksheet_name)
+    except (FileNotFoundError, PermissionError, OSError) as exc:
+        print(f"Could not open workbook for status update: {exc}")
+        return
     try:
         worksheet = context.worksheet
         headers = ensure_headers(worksheet)
         row = get_row_index_by_value(worksheet, headers["Bid Number"], bid_number)
         if row is None:
-            raise ValueError(f"Bid number not found in workbook: {bid_number}")
+            print(f"Bid number not found in workbook after sync: {bid_number}")
+            return
 
         if "Proposal Amount" in headers:
             current_amount = get_cell_text(worksheet, row, headers["Proposal Amount"])
@@ -422,7 +437,7 @@ def main() -> None:
         elif choice == "2":
             sync_bid_workbook(bid_root, workbook_path, worksheet_name)
         elif choice == "3":
-            update_bid_status(workbook_path, worksheet_name)
+            update_bid_status(bid_root, workbook_path, worksheet_name)
         elif choice == "4":
             break
         else:
